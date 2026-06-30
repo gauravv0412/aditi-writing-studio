@@ -1,81 +1,127 @@
-"""SQLite storage layer for the Writing Studio.
+"""Storage layer. Uses Postgres when DATABASE_URL is set (so hosted history
+persists across restarts), otherwise a local SQLite file. Same API either way.
 
-One small database file holds everything: articles, their full version history,
-the chat log, the growing corpus of finished articles (the "style examples"),
-the evolving style profile, and the learned style notes. No external DB needed.
+One small schema holds everything: articles, their full version history, the
+chat log, the growing corpus of finished articles, the evolving style profile,
+and the learned style notes.
 """
 import os
-import sqlite3
 import time
 
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+IS_PG = DATABASE_URL.startswith(("postgres://", "postgresql://"))
 DB_PATH = os.environ.get("DB_PATH", os.path.join(os.path.dirname(__file__), "data", "studio.db"))
+
+if IS_PG:
+    import psycopg
+    from psycopg.rows import dict_row
+else:
+    import sqlite3
 
 
 def _now() -> float:
     return time.time()
 
 
-def connect() -> sqlite3.Connection:
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
-    return conn
+class Conn:
+    """Thin wrapper so the rest of the app can stay backend-agnostic.
+
+    Exposes execute()/commit()/close() and works as a context manager that
+    commits on clean exit and always closes.
+    """
+
+    def __init__(self):
+        if IS_PG:
+            self._c = psycopg.connect(DATABASE_URL, row_factory=dict_row, autocommit=False)
+        else:
+            os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+            self._c = sqlite3.connect(DB_PATH)
+            self._c.row_factory = sqlite3.Row
+            self._c.execute("PRAGMA journal_mode=WAL")
+            self._c.execute("PRAGMA foreign_keys=ON")
+
+    def execute(self, sql, params=()):
+        if IS_PG:
+            sql = sql.replace("?", "%s")
+        return self._c.execute(sql, params)
+
+    def commit(self):
+        self._c.commit()
+
+    def close(self):
+        try:
+            self._c.close()
+        except Exception:
+            pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, et, ev, tb):
+        if et is None:
+            try:
+                self.commit()
+            except Exception:
+                pass
+        self.close()
 
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS articles (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    title      TEXT NOT NULL DEFAULT 'Untitled',
-    topic      TEXT NOT NULL DEFAULT '',
-    content    TEXT NOT NULL DEFAULT '',
-    status     TEXT NOT NULL DEFAULT 'draft',      -- draft | published
-    created_at REAL NOT NULL,
-    updated_at REAL NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS versions (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    article_id INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
-    content    TEXT NOT NULL,
-    source     TEXT NOT NULL,                       -- generated | ai_edit | manual | restore
-    label      TEXT NOT NULL DEFAULT '',
-    created_at REAL NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS chat_messages (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    article_id INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
-    role       TEXT NOT NULL,                       -- user | assistant
-    content    TEXT NOT NULL,
-    created_at REAL NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS style_examples (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    title      TEXT NOT NULL DEFAULT '',
-    content    TEXT NOT NULL,
-    source     TEXT NOT NULL DEFAULT 'seed',        -- seed | written
-    created_at REAL NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS style_notes (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    note       TEXT NOT NULL,
-    source     TEXT NOT NULL DEFAULT 'seed',        -- seed | chat | manual
-    created_at REAL NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS settings (
-    key   TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-);
-"""
+def connect() -> Conn:
+    return Conn()
 
 
-def init_db(conn: sqlite3.Connection) -> None:
-    conn.executescript(SCHEMA)
+# ---- schema (portable across SQLite + Postgres) ---------------------------
+_PK = "BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY" if IS_PG else "INTEGER PRIMARY KEY AUTOINCREMENT"
+_REAL = "DOUBLE PRECISION" if IS_PG else "REAL"
+
+SCHEMA_STATEMENTS = [
+    f"""CREATE TABLE IF NOT EXISTS articles (
+        id         {_PK},
+        title      TEXT NOT NULL DEFAULT 'Untitled',
+        topic      TEXT NOT NULL DEFAULT '',
+        content    TEXT NOT NULL DEFAULT '',
+        status     TEXT NOT NULL DEFAULT 'draft',
+        created_at {_REAL} NOT NULL,
+        updated_at {_REAL} NOT NULL
+    )""",
+    f"""CREATE TABLE IF NOT EXISTS versions (
+        id         {_PK},
+        article_id BIGINT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+        content    TEXT NOT NULL,
+        source     TEXT NOT NULL,
+        label      TEXT NOT NULL DEFAULT '',
+        created_at {_REAL} NOT NULL
+    )""",
+    f"""CREATE TABLE IF NOT EXISTS chat_messages (
+        id         {_PK},
+        article_id BIGINT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+        role       TEXT NOT NULL,
+        content    TEXT NOT NULL,
+        created_at {_REAL} NOT NULL
+    )""",
+    f"""CREATE TABLE IF NOT EXISTS style_examples (
+        id         {_PK},
+        title      TEXT NOT NULL DEFAULT '',
+        content    TEXT NOT NULL,
+        source     TEXT NOT NULL DEFAULT 'seed',
+        created_at {_REAL} NOT NULL
+    )""",
+    f"""CREATE TABLE IF NOT EXISTS style_notes (
+        id         {_PK},
+        note       TEXT NOT NULL,
+        source     TEXT NOT NULL DEFAULT 'seed',
+        created_at {_REAL} NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS settings (
+        key   TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    )""",
+]
+
+
+def init_db(conn) -> None:
+    for stmt in SCHEMA_STATEMENTS:
+        conn.execute(stmt)
     conn.commit()
 
 
@@ -97,12 +143,13 @@ def set_setting(conn, key, value):
 # ---- articles -------------------------------------------------------------
 def create_article(conn, title="Untitled", topic="", content=""):
     t = _now()
-    cur = conn.execute(
-        "INSERT INTO articles(title, topic, content, created_at, updated_at) VALUES(?,?,?,?,?)",
+    row = conn.execute(
+        "INSERT INTO articles(title, topic, content, created_at, updated_at) "
+        "VALUES(?,?,?,?,?) RETURNING id",
         (title or "Untitled", topic, content, t, t),
-    )
+    ).fetchone()
     conn.commit()
-    return cur.lastrowid
+    return row["id"]
 
 
 def get_article(conn, article_id):
@@ -137,12 +184,13 @@ def delete_article(conn, article_id):
 
 # ---- versions -------------------------------------------------------------
 def add_version(conn, article_id, content, source, label=""):
-    cur = conn.execute(
-        "INSERT INTO versions(article_id, content, source, label, created_at) VALUES(?,?,?,?,?)",
+    row = conn.execute(
+        "INSERT INTO versions(article_id, content, source, label, created_at) "
+        "VALUES(?,?,?,?,?) RETURNING id",
         (article_id, content, source, label, _now()),
-    )
+    ).fetchone()
     conn.commit()
-    return cur.lastrowid
+    return row["id"]
 
 
 def list_versions(conn, article_id):
@@ -194,11 +242,10 @@ def count_style_examples(conn):
 
 
 def add_style_note(conn, note, source="manual"):
-    note = note.strip()
+    note = (note or "").strip()
     if not note:
         return
-    exists = conn.execute("SELECT 1 FROM style_notes WHERE lower(note)=lower(?)", (note,)).fetchone()
-    if exists:
+    if conn.execute("SELECT 1 FROM style_notes WHERE lower(note)=lower(?)", (note,)).fetchone():
         return
     conn.execute(
         "INSERT INTO style_notes(note, source, created_at) VALUES(?,?,?)",
