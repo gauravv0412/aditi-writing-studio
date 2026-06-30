@@ -46,8 +46,13 @@ HTML_RULES = """FORMATTING — output clean, semantic HTML (it renders in a live
   no commentary before or after."""
 
 HUMANISE = (
-    "Write naturally in her human voice. Vary sentence length and rhythm. Avoid formulaic AI "
-    "phrasing and generic transitions. Do not add any preamble or sign-off beyond what her style calls for."
+    "Write so convincingly in her voice that she could read it and feel she wrote it herself — "
+    "not that she edited an AI draft, but that she WROTE it. Match her exact rhythm and texture: "
+    "her medium-long, sometimes run-on sentences, her comma-chained lists introduced with a dash, "
+    "her British spelling, and her habit of defining terms in passing. Do NOT produce a cleaner, more "
+    "'correct', or more polished version than she would write — her small human imperfections are part "
+    "of the voice. Never sound like an AI assistant or a content mill; avoid every generic AI tell. "
+    "Add no preamble or sign-off beyond what her style calls for — output only the article."
 )
 
 
@@ -84,7 +89,7 @@ def build_generation_system(conn) -> str:
     return (
         get_profile(conn)
         + get_notes_block(conn)
-        + get_examples_block(conn, limit=2)
+        + get_examples_block(conn, limit=6)
         + "\n\n" + HTML_RULES
         + "\n\n" + HUMANISE
     )
