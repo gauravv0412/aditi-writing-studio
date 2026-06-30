@@ -28,6 +28,7 @@ import seed
 
 HERE = os.path.dirname(__file__)
 MODEL = os.environ.get("MODEL", "claude-opus-4-8")
+STYLE_MODEL = os.environ.get("STYLE_MODEL", "claude-sonnet-4-6")  # fast helper for style-rule extraction
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "").strip()
 AUTH_TOKEN = hashlib.sha256(f"studio::{APP_PASSWORD}".encode()).hexdigest()
 MAX_TOKENS = 4096
@@ -398,11 +399,61 @@ def generate(aid: int, body: GenerateBody):
     return StreamingResponse(stream(), media_type="text/event-stream")
 
 
-_NOTE_TRIGGERS = re.compile(
-    r"\b(always|never|from now on|prefer|i like|i don't like|i dont like|don't ever|"
-    r"stop using|avoid|make sure|use british|use indian|never use|don't use|dont use)\b",
-    re.IGNORECASE,
-)
+STYLE_EXTRACT_SCHEMA = {
+    "type": "object", "additionalProperties": False,
+    "properties": {
+        "pure_style": {"type": "boolean"},
+        "add": {"type": "array", "items": {"type": "string"}},
+        "remove_ids": {"type": "array", "items": {"type": "integer"}},
+        "summary": {"type": "string"},
+    },
+    "required": ["pure_style", "add", "remove_ids", "summary"],
+}
+
+
+def extract_style_change(conn, client, instruction):
+    """Detect durable style-rule changes in a chat message (add / modify / remove)."""
+    try:
+        msg = client.messages.create(
+            model=STYLE_MODEL, max_tokens=700,
+            system=prompts.STYLE_EXTRACT_SYSTEM,
+            messages=[{"role": "user", "content": prompts.build_style_extract_user(conn, instruction)}],
+            output_config={"format": {"type": "json_schema", "schema": STYLE_EXTRACT_SCHEMA}},
+        )
+        data = json.loads("".join(b.text for b in msg.content if b.type == "text").strip())
+        return {
+            "pure_style": bool(data.get("pure_style")),
+            "add": [s.strip() for s in data.get("add", []) if isinstance(s, str) and s.strip()][:6],
+            "remove_ids": [int(i) for i in data.get("remove_ids", []) if str(i).lstrip("-").isdigit()][:12],
+            "summary": (data.get("summary") or "").strip(),
+        }
+    except Exception:
+        return {"pure_style": False, "add": [], "remove_ids": [], "summary": ""}
+
+
+def apply_style_change(conn, change):
+    existing = {n["id"] for n in db.list_style_notes(conn)}
+    removed = 0
+    for rid in dict.fromkeys(change["remove_ids"]):  # dedupe; only count rules that actually exist
+        if rid in existing:
+            db.delete_style_note(conn, rid)
+            removed += 1
+    added = 0
+    for rule in change["add"]:
+        before = len(db.list_style_notes(conn))
+        db.add_style_note(conn, rule, source="chat")
+        if len(db.list_style_notes(conn)) > before:
+            added += 1
+    if not added and not removed:
+        return None
+    if change["summary"]:
+        return "📝 " + change["summary"]
+    bits = []
+    if added:
+        bits.append(f"added {added} rule(s)")
+    if removed:
+        bits.append(f"removed {removed} rule(s)")
+    return "📝 Style updated — " + " and ".join(bits) + "."
 
 
 class ChatBody(BaseModel):
@@ -426,6 +477,19 @@ def chat(aid: int, body: ChatBody):
                 yield sse({"type": "error", "message": "No API key set. Open Settings and paste your Anthropic API key."})
                 return
             db.add_chat(conn, aid, "user", instruction)
+
+            # First: does this instruction change her durable style rules?
+            change = extract_style_change(conn, client, instruction)
+            applied = apply_style_change(conn, change)
+
+            # Pure style management — update the rules, leave the article alone.
+            if change["pure_style"]:
+                summary = applied or "Noted — nothing needed changing in your rules."
+                db.add_chat(conn, aid, "assistant", summary)
+                yield sse({"type": "style", "summary": summary})
+                return
+
+            # Otherwise edit the draft (any new rules are already in effect below).
             system = prompts.build_chat_system(conn)
             user = prompts.build_chat_user(current, instruction)
             chunks = []
@@ -447,12 +511,11 @@ def chat(aid: int, body: ChatBody):
             title = first_line_title(content, db.get_article(conn, aid)["topic"])
             db.update_article(conn, aid, content=content, title=title)
             vid = db.add_version(conn, aid, content, "ai_edit", label=instruction[:60])
-            learned = None
-            if _NOTE_TRIGGERS.search(instruction) and len(instruction) <= 200:
-                db.add_style_note(conn, instruction, source="chat")
-                learned = instruction
-            db.add_chat(conn, aid, "assistant", "✓ Updated the draft.")
-            yield sse({"type": "done", "version_id": vid, "title": title, "learned": learned, "content": content})
+            db.add_chat(conn, aid, "assistant", "✓ Updated the draft." + (("  " + applied) if applied else ""))
+            done = {"type": "done", "version_id": vid, "title": title, "content": content}
+            if applied:
+                done["learned"] = applied
+            yield sse(done)
         finally:
             conn.close()
 

@@ -149,3 +149,36 @@ def build_profile_refresh_messages(conn):
         "prescriptive, ~400-700 words. Do not mention the author's qualifications or degree. "
         "Output only the style profile."
     )
+
+
+# --- chat-driven style-rule management -------------------------------------
+STYLE_EXTRACT_SYSTEM = (
+    "You manage a writer's personal STYLE RULES — short, durable instructions about how she wants "
+    "her articles written. You are given her current rules and a new instruction she just sent to her "
+    "writing assistant. Decide whether the instruction expresses a DURABLE preference that should "
+    "change her rules (add a new rule, or modify/remove an existing one), as opposed to a one-off "
+    "edit of the current draft.\n\n"
+    "Add a rule only for durable preferences (signals like 'always', 'never', 'from now on', "
+    "'I prefer', 'stop doing', 'I like', \"I don't like\", 'make sure to', 'going forward', "
+    "'add a rule', 'as a rule'). A one-off request like 'make this intro warmer' or 'add a diagnosis "
+    "section here' is NOT a rule — return empty add/remove for those.\n"
+    "Be conservative with removals. Default to ADDING a rule. Only put an id in remove_ids when she "
+    "explicitly asks to remove or change that rule, OR when the new instruction directly contradicts "
+    "that specific existing rule. Whenever you remove a contradicted rule you MUST also add the new "
+    "preference as its replacement in add — never remove a rule without adding a replacement. Never "
+    "remove rules that are merely related or adjacent. If the new preference is already covered by an "
+    "existing rule, change nothing (empty add and remove_ids).\n"
+    "Set pure_style=true only when she is ONLY managing her rules and is NOT asking to change the "
+    "current article's content. Keep added rules short and in her imperative voice. Write summary as "
+    "one short, friendly sentence describing what you changed (or empty if nothing changed)."
+)
+
+
+def build_style_extract_user(conn, instruction):
+    notes = db.list_style_notes(conn)
+    notes_text = "\n".join(f"{n['id']}: {n['note']}" for n in notes) or "(no rules yet)"
+    return (
+        f"CURRENT RULES (id: rule):\n{notes_text}\n\n"
+        f"HER NEW INSTRUCTION:\n{instruction}\n\n"
+        "Return the JSON."
+    )

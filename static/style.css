@@ -46,6 +46,7 @@ input:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px
 .topbar {
   display: flex; align-items: center; justify-content: space-between;
   padding: 10px 18px; background: var(--panel); border-bottom: 1px solid var(--line);
+  position: relative; z-index: 50;  /* stay above the drawer backdrop so toggles are tappable */
 }
 .brand { font-size: 17px; font-weight: 700; letter-spacing: -.2px; }
 .brand span { vertical-align: middle; }
@@ -171,10 +172,7 @@ input:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px
   font-size: 13.5px; box-shadow: 0 8px 30px rgba(0,0,0,.3); z-index: 80; max-width: 80%;
 }
 
-@media (max-width: 1000px) {
-  .layout { grid-template-columns: 1fr; grid-template-rows: auto auto auto; }
-  .sidebar, .chat-col { max-height: 240px; }
-}
+/* responsive layout defined at the end of this file */
 
 /* ---- rich-text editor ---- */
 .editor { outline: none; white-space: normal; }
@@ -206,3 +204,37 @@ input:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px
 .brand-mark { font-size: 18px; font-weight: 800; letter-spacing: -.3px; }
 .brand-tld { color: var(--accent); }
 .brand-sub { font-size: 11px; color: var(--muted); font-weight: 500; }
+
+/* ---- word count + drawer toggles (desktop base) ---- */
+.topbar-left { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.word-count { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.drawer-toggle { display: none; font-size: 17px; line-height: 1; padding: 7px 10px; }
+.drawer-backdrop { position: fixed; inset: 0; background: rgba(20,24,28,.4); z-index: 30; }
+
+/* ---- iPad / tablet / phone: editor full-width, sidebar + chat become drawers ---- */
+@media (max-width: 1100px) {
+  .drawer-toggle { display: inline-flex; align-items: center; }
+  .layout { grid-template-columns: 1fr; }
+  .sidebar, .chat-col {
+    position: fixed; top: 54px; bottom: 0; width: 300px; max-width: 86vw; z-index: 40;
+    transition: transform .25s ease; box-shadow: 0 12px 40px rgba(0,0,0,.22);
+  }
+  .sidebar { left: 0; transform: translateX(-100%); overflow-y: auto; }
+  .chat-col { right: 0; transform: translateX(100%); }
+  .sidebar.open, .chat-col.open { transform: translateX(0); }
+  .drawer-backdrop { top: 54px; }  /* dim only the content, never the header toggles */
+  input, textarea, .title-display, .fmt-select { font-size: 16px; }  /* prevent iOS zoom-on-focus */
+  .fmt { min-height: 38px; padding: 8px 12px; font-size: 15px; }
+  .ghost { padding: 9px 12px; }
+  .article-item { padding: 13px 12px; }
+  .editor { padding: 30px 26px; font-size: 18px; }
+  .page-wrap { padding: 18px 0 70px; }
+  .topic-bar { padding: 12px 14px; }
+  .format-toolbar, .editor-toolbar { padding: 8px 14px; }
+}
+
+/* ---- touch screens: keep the delete icon tappable (no hover) ---- */
+@media (hover: none) {
+  .article-item .ai-del { opacity: .5; }
+  .article-item.active .ai-del { opacity: .85; }
+}

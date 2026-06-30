@@ -27,14 +27,32 @@ function toast(msg) {
 function setSaveStatus(s) { $("#save-status").textContent = s; }
 function showOverlay(n) { $("#" + n + "-overlay").classList.remove("hidden"); }
 function hideOverlay(n) { $("#" + n + "-overlay").classList.add("hidden"); }
+function closeDrawers() {
+  $("#sidebar").classList.remove("open");
+  $("#chat").classList.remove("open");
+  $("#drawer-backdrop").classList.add("hidden");
+}
+function toggleDrawer(which) {
+  const el = which === "articles" ? $("#sidebar") : $("#chat");
+  const other = which === "articles" ? $("#chat") : $("#sidebar");
+  other.classList.remove("open");
+  const open = !el.classList.contains("open");
+  el.classList.toggle("open", open);
+  $("#drawer-backdrop").classList.toggle("hidden", !open);
+}
 
 // ---------- editor (rich text) ----------
 function getContent() {
   const h = $("#editor").innerHTML.trim();
   return (h === "<br>" || h === "<div><br></div>" || h === "<p><br></p>") ? "" : h;
 }
-function setContent(html) { $("#editor").innerHTML = html || ""; }
+function setContent(html) { $("#editor").innerHTML = html || ""; updateWordCount(); }
 function scrollEditorBottom() { const w = $(".page-wrap"); w.scrollTop = w.scrollHeight; }
+function updateWordCount() {
+  const t = ($("#editor").textContent || "").trim();
+  const n = t ? t.split(/\s+/).length : 0;
+  $("#word-count").textContent = n === 1 ? "1 word" : n.toLocaleString() + " words";
+}
 
 // ---------- API ----------
 async function api(method, path, body) {
@@ -47,7 +65,7 @@ async function api(method, path, body) {
   return ct.includes("application/json") ? res.json() : res.text();
 }
 
-async function streamPost(path, body, { onDelta, onDone, onError }) {
+async function streamPost(path, body, { onDelta, onDone, onError, onStyle }) {
   let res;
   try {
     res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -71,6 +89,7 @@ async function streamPost(path, body, { onDelta, onDone, onError }) {
       try { obj = JSON.parse(line.slice(5).trim()); } catch { continue; }
       if (obj.type === "delta") onDelta && onDelta(obj.text);
       else if (obj.type === "done") onDone && onDone(obj);
+      else if (obj.type === "style") onStyle && onStyle(obj);
       else if (obj.type === "error") onError && onError(obj.message);
     }
   }
@@ -135,6 +154,7 @@ async function selectArticle(id) {
   renderChat(a.chat || []);
   renderArticleList();
   setSaveStatus("");
+  if (window.innerWidth <= 1100) closeDrawers();
 }
 async function deleteArticle(id) {
   if (!confirm("Delete this article and its history?")) return;
@@ -155,7 +175,7 @@ async function generate() {
   let acc = "";
   setContent("");
   await streamPost(`/api/articles/${state.articleId}/generate`, { topic }, {
-    onDelta: (t) => { acc += t; $("#editor").innerHTML = acc; scrollEditorBottom(); },
+    onDelta: (t) => { acc += t; $("#editor").innerHTML = acc; updateWordCount(); scrollEditorBottom(); },
     onDone: (d) => {
       endStream();
       setContent(d.content || acc);
@@ -188,23 +208,23 @@ async function sendChat() {
   if (!state.articleId) { toast("Write or open an article first."); return; }
   $("#chat-input").value = "";
   addChatMsg("user", msg);
-  const working = addChatMsg("assistant", "Updating the draft…", true);
+  const working = addChatMsg("assistant", "Working…", true);
   beginStream();
   const current = getContent();
-  let acc = "";
-  setContent("");
+  let acc = "", cleared = false;
   await streamPost(`/api/articles/${state.articleId}/chat`, { message: msg, content: current }, {
-    onDelta: (t) => { acc += t; $("#editor").innerHTML = acc; scrollEditorBottom(); },
+    onDelta: (t) => { if (!cleared) { setContent(""); cleared = true; } acc += t; $("#editor").innerHTML = acc; updateWordCount(); scrollEditorBottom(); },
+    onStyle: (d) => { endStream(); working.remove(); addChatMsg("assistant", d.summary || "Style updated."); },
     onDone: (d) => {
       endStream(); working.remove();
       setContent(d.content || acc);
       addChatMsg("assistant", "✓ Updated the draft.");
       $("#title-display").value = d.title || $("#title-display").value;
       state.lastSaved = getContent(); state.lastTitle = $("#title-display").value;
-      if (d.learned) toast("Learned a new rule: " + d.learned);
+      if (d.learned) toast(d.learned);
       loadArticles();
     },
-    onError: (m) => { endStream(); working.remove(); setContent(current); state.lastSaved = getContent(); addChatMsg("assistant", "⚠ " + m); },
+    onError: (m) => { endStream(); working.remove(); if (cleared) { setContent(current); state.lastSaved = getContent(); } addChatMsg("assistant", "⚠ " + m); },
   });
 }
 
@@ -402,7 +422,7 @@ function wire() {
   $("#chat-send").onclick = sendChat;
   $("#chat-input").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); } });
 
-  $("#editor").addEventListener("input", scheduleSave);
+  $("#editor").addEventListener("input", () => { updateWordCount(); scheduleSave(); });
   $("#editor").addEventListener("blur", flushSave);
   $("#title-display").addEventListener("input", scheduleSave);
 
@@ -430,13 +450,21 @@ function wire() {
   $("#new-note").addEventListener("keydown", (e) => { if (e.key === "Enter") addNote(); });
   $("#refresh-profile").onclick = refreshProfile;
 
+  $("#toggle-articles").onclick = () => toggleDrawer("articles");
+  $("#toggle-chat").onclick = () => toggleDrawer("chat");
+  $("#drawer-backdrop").onclick = closeDrawers;
+
   document.querySelectorAll(".overlay").forEach((ov) => {
     if (ov.id === "login-overlay") return;
     ov.addEventListener("click", (e) => { if (e.target === ov) ov.classList.add("hidden"); });
   });
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") document.querySelectorAll(".overlay:not(#login-overlay)").forEach((o) => o.classList.add("hidden"));
+    if (e.key === "Escape") {
+      document.querySelectorAll(".overlay:not(#login-overlay)").forEach((o) => o.classList.add("hidden"));
+      closeDrawers();
+    }
   });
+  updateWordCount();
 }
 
 wire();

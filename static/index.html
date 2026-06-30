@@ -22,12 +22,16 @@
   </div>
 
   <header class="topbar">
-    <div class="brand">
-      <span class="brand-mark">✍️ aditiwrites<span class="brand-tld">.in</span></span>
-      <span class="brand-sub">Aditi Srivastava · Writing Studio</span>
+    <div class="topbar-left">
+      <button id="toggle-articles" class="ghost drawer-toggle" title="Show articles" aria-label="Show articles">☰</button>
+      <div class="brand">
+        <span class="brand-mark">✍️ aditiwrites<span class="brand-tld">.in</span></span>
+        <span class="brand-sub">Aditi Srivastava · Writing Studio</span>
+      </div>
     </div>
     <div class="top-actions">
       <span id="model-pill" class="pill"></span>
+      <button id="toggle-chat" class="ghost drawer-toggle" title="Show assistant" aria-label="Show assistant">💬</button>
       <button id="style-btn" class="ghost" title="Her writing style">🧬 Style</button>
       <button id="settings-btn" class="ghost" title="Settings">⚙️ Settings</button>
     </div>
@@ -40,7 +44,7 @@
 
   <main class="layout">
     <!-- Sidebar: history -->
-    <aside class="sidebar">
+    <aside id="sidebar" class="sidebar">
       <button id="new-btn" class="primary block">＋ New article</button>
       <div id="article-list" class="article-list"></div>
     </aside>
@@ -55,6 +59,7 @@
       <div class="editor-toolbar">
         <input id="title-display" class="title-display" placeholder="Untitled" />
         <div class="toolbar-right">
+          <span id="word-count" class="word-count"></span>
           <span id="save-status" class="save-status"></span>
           <button id="versions-btn" class="ghost small" title="Version history">🕘 History</button>
           <button id="export-btn" class="ghost small" title="Download as Word / Google Docs">⬇︎ Word</button>
@@ -94,7 +99,7 @@
     </section>
 
     <!-- Chat column -->
-    <section class="chat-col">
+    <section id="chat" class="chat-col">
       <div class="chat-head">💬 Ask the assistant to change the draft</div>
       <div id="chat-messages" class="chat-messages">
         <div class="chat-hint">Tip: “make the intro warmer”, “add a section on diagnosis”, “make the title bigger”, “bold the key terms”, “use British spelling”. Your manual edits and formatting are kept.</div>
@@ -164,6 +169,7 @@
     </div>
   </div>
 
+  <div id="drawer-backdrop" class="drawer-backdrop hidden"></div>
   <div id="toast" class="toast hidden"></div>
 
   <script src="/static/app.js"></script>
