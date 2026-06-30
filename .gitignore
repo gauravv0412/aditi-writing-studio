@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+data/
+*.docx
+articles_raw/
+.DS_Store
+style_seed.json

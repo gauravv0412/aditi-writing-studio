@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>aditiwrites.in — Aditi Srivastava</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✍️</text></svg>" />
+</head>
+<body>
+  <!-- Login gate -->
+  <div id="login-overlay" class="overlay hidden">
+    <div class="modal">
+      <h2>✍️ aditiwrites<span style="color:var(--accent)">.in</span></h2>
+      <p class="muted">Aditi Srivastava's writing studio. Enter the password to continue.</p>
+      <input id="login-password" type="password" placeholder="Password" autocomplete="current-password" />
+      <div id="login-error" class="error hidden"></div>
+      <div class="modal-actions">
+        <button id="login-btn" class="primary">Open</button>
+      </div>
+    </div>
+  </div>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">✍️ aditiwrites<span class="brand-tld">.in</span></span>
+      <span class="brand-sub">Aditi Srivastava · Writing Studio</span>
+    </div>
+    <div class="top-actions">
+      <span id="model-pill" class="pill"></span>
+      <button id="style-btn" class="ghost" title="Her writing style">🧬 Style</button>
+      <button id="settings-btn" class="ghost" title="Settings">⚙️ Settings</button>
+    </div>
+  </header>
+
+  <div id="apikey-banner" class="banner hidden">
+    No API key set — the AI can't write yet.
+    <button id="banner-settings" class="link">Add the Anthropic API key →</button>
+  </div>
+
+  <main class="layout">
+    <!-- Sidebar: history -->
+    <aside class="sidebar">
+      <button id="new-btn" class="primary block">＋ New article</button>
+      <div id="article-list" class="article-list"></div>
+    </aside>
+
+    <!-- Editor column -->
+    <section class="editor-col">
+      <div class="topic-bar">
+        <input id="topic-input" type="text" placeholder="Enter a topic, e.g. “Ventricular septal defect — what parents should know”" />
+        <button id="generate-btn" class="primary">✨ Write</button>
+      </div>
+
+      <div class="editor-toolbar">
+        <input id="title-display" class="title-display" placeholder="Untitled" />
+        <div class="toolbar-right">
+          <span id="save-status" class="save-status"></span>
+          <button id="versions-btn" class="ghost small" title="Version history">🕘 History</button>
+          <button id="export-btn" class="ghost small" title="Download as Word / Google Docs">⬇︎ Word</button>
+          <button id="done-btn" class="ghost small" title="Mark done — the tool learns from this article">✓ Mark done</button>
+        </div>
+      </div>
+
+      <!-- Formatting toolbar -->
+      <div class="format-toolbar">
+        <button class="fmt" data-cmd="bold" title="Bold (Ctrl+B)"><b>B</b></button>
+        <button class="fmt" data-cmd="italic" title="Italic (Ctrl+I)"><i>I</i></button>
+        <button class="fmt" data-cmd="underline" title="Underline (Ctrl+U)"><u>U</u></button>
+        <span class="fmt-sep"></span>
+        <button class="fmt" data-block="h1" title="Title">Title</button>
+        <button class="fmt" data-block="h2" title="Heading">H2</button>
+        <button class="fmt" data-block="h3" title="Subheading">H3</button>
+        <button class="fmt" data-block="p" title="Normal text">¶</button>
+        <span class="fmt-sep"></span>
+        <button class="fmt" data-cmd="insertUnorderedList" title="Bullet list">• List</button>
+        <button class="fmt" data-cmd="insertOrderedList" title="Numbered list">1. List</button>
+        <span class="fmt-sep"></span>
+        <select id="font-size" class="fmt-select" title="Font size">
+          <option value="">Size…</option>
+          <option value="2">Small</option>
+          <option value="3">Normal</option>
+          <option value="5">Large</option>
+          <option value="6">X-Large</option>
+          <option value="7">Huge</option>
+        </select>
+        <button class="fmt" id="clear-fmt" title="Clear formatting">⌫ Clear</button>
+      </div>
+
+      <div class="page-wrap">
+        <div id="editor" class="editor" contenteditable="true"
+             data-placeholder="Your article will appear here. Enter a topic above and press Write — then edit and format freely, or ask the assistant on the right to make changes."></div>
+      </div>
+    </section>
+
+    <!-- Chat column -->
+    <section class="chat-col">
+      <div class="chat-head">💬 Ask the assistant to change the draft</div>
+      <div id="chat-messages" class="chat-messages">
+        <div class="chat-hint">Tip: “make the intro warmer”, “add a section on diagnosis”, “make the title bigger”, “bold the key terms”, “use British spelling”. Your manual edits and formatting are kept.</div>
+      </div>
+      <div class="chat-input-row">
+        <textarea id="chat-input" placeholder="Type a change… (Enter to send)"></textarea>
+        <button id="chat-send" class="primary">Send</button>
+      </div>
+    </section>
+  </main>
+
+  <!-- Settings modal -->
+  <div id="settings-overlay" class="overlay hidden">
+    <div class="modal">
+      <h2>⚙️ Settings</h2>
+      <label class="field-label">Anthropic API key</label>
+      <p class="muted small">Stored only on this server. Get one at console.anthropic.com → API keys. Powers all the writing (a few cents per article).</p>
+      <input id="apikey-input" type="password" placeholder="sk-ant-..." />
+      <div id="apikey-status" class="muted small"></div>
+      <div class="modal-actions">
+        <button id="settings-close" class="ghost">Close</button>
+        <button id="apikey-save" class="primary">Save key</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Style modal -->
+  <div id="style-overlay" class="overlay hidden">
+    <div class="modal wide">
+      <h2>🧬 Aditi's writing style</h2>
+      <p class="muted small">What the tool has learned about how she writes. It grows every time you mark an article as done.</p>
+
+      <div class="style-section">
+        <div class="style-head">
+          <strong>Personal rules</strong>
+          <span id="examples-count" class="muted small"></span>
+        </div>
+        <ul id="notes-list" class="notes-list"></ul>
+        <div class="add-note-row">
+          <input id="new-note" type="text" placeholder="Add a rule, e.g. “Keep paragraphs under 5 sentences”" />
+          <button id="add-note" class="ghost small">Add</button>
+        </div>
+      </div>
+
+      <div class="style-section">
+        <div class="style-head">
+          <strong>Style profile</strong>
+          <button id="refresh-profile" class="ghost small" title="Rebuild from all finished articles">↻ Rebuild from articles</button>
+        </div>
+        <textarea id="profile-text" class="profile-text" readonly></textarea>
+      </div>
+
+      <div class="modal-actions">
+        <button id="style-close" class="primary">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Versions modal -->
+  <div id="versions-overlay" class="overlay hidden">
+    <div class="modal">
+      <h2>🕘 Version history</h2>
+      <div id="versions-list" class="versions-list"></div>
+      <div class="modal-actions">
+        <button id="versions-close" class="primary">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
